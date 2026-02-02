@@ -9,6 +9,11 @@ INSTALLED_APPS = [
     'core',
     'master',
     'inventory',
+    'accounting',
+    'crm',
+    'pos',
+    'purchase',
+    'sales',
     'django_filters',
 
     "rest_framework",

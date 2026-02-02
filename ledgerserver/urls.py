@@ -8,6 +8,9 @@ urlpatterns = [
     path('auth/', include('djoser.urls.jwt')),
     path('api/inventory/', include('inventory.urls')),
     path('api/master/', include('master.urls')),
+    path('api/pos/', include('pos.urls')),
+    path('api/purchase/', include('purchase.urls')),
+    path('api/sales/', include('sales.urls')),
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

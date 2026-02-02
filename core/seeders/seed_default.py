@@ -1,3 +1,5 @@
+import os
+
 from django.db import transaction
 
 
@@ -27,6 +29,17 @@ def seed_all_defaults(schema_name: str = "default"):
 
         User = get_user_model()
         User.objects.filter(is_superuser=True, branch__isnull=True).update(branch=main_branch)
+
+        if not User.objects.filter(is_superuser=True).exists():
+            default_username = os.getenv("DEFAULT_SUPERUSER_USERNAME", "admin")
+            default_email = os.getenv("DEFAULT_SUPERUSER_EMAIL", "admin@example.com")
+            default_password = os.getenv("DEFAULT_SUPERUSER_PASSWORD", "admin123")
+            User.objects.create_superuser(
+                username=default_username,
+                email=default_email,
+                password=default_password,
+                branch=main_branch,
+            )
 
         # ---- Currency defaults ----
         default_currencies = [

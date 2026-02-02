@@ -18,6 +18,11 @@ from .models import (
 class ReadablePKField(serializers.PrimaryKeyRelatedField):
     """Shows readable string in response while still being PK-based."""
 
+    def __init__(self, *args, **kwargs):
+        if kwargs.get("queryset") is None and not kwargs.get("read_only"):
+            kwargs["queryset"] = PurchaseOrder.objects.none()
+        super().__init__(*args, **kwargs)
+
     def to_representation(self, value):
         return {"id": str(value.pk), "label": str(value)}
 

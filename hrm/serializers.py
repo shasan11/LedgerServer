@@ -19,6 +19,20 @@ from .models import (
 class ReadablePKField(serializers.PrimaryKeyRelatedField):
     """Shows readable string in response while still being PK-based."""
 
+    def __init__(self, *args, **kwargs):
+        self._placeholder_queryset = object()
+        if kwargs.get("queryset") is None and not kwargs.get("read_only", False):
+            kwargs["queryset"] = self._placeholder_queryset
+        super().__init__(*args, **kwargs)
+
+    def get_queryset(self):
+        queryset = self.queryset
+        if queryset is self._placeholder_queryset:
+            return None
+        if hasattr(queryset, "all"):
+            return queryset.all()
+        return queryset
+
     def to_representation(self, value):
         return {"id": str(value.pk), "label": str(value)}
 

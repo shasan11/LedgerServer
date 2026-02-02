@@ -35,9 +35,8 @@ TaxRate = apps.get_model("master", "TaxRate")
 
 
 class ReadablePKField(serializers.PrimaryKeyRelatedField):
-    """
-    PK-based field that returns a readable {id,label} in responses.
-    """
+    """Shows readable string in response while still being PK-based."""
+
     def to_representation(self, value):
         if value is None:
             return None

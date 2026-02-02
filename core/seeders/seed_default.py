@@ -1,129 +1,202 @@
 from django.db import transaction
-from django.db.utils import OperationalError, ProgrammingError
-
-
-def _model_has_field(Model, field_name: str) -> bool:
-    return any(f.name == field_name for f in Model._meta.get_fields())
 
 
 def seed_all_defaults(schema_name: str = "default"):
     try:
-        from accounting.models import Currency, ChartofAccounts, PaymentMethod
-        from master.models import Branch, MasterData, ShipmentPrefixes, ApplicationSettings
+        from django.contrib.auth import get_user_model
+        from accounting.models import AccountType, COA
+        from master.models import Branch, Currency, TaxClass, TaxRate, MasterData
     except Exception:
         return
 
     with transaction.atomic():
-        # ---- Singleton defaults ----
-        if not ShipmentPrefixes.objects.exists():
-            ShipmentPrefixes.objects.create()
+        # ---- Branch defaults ----
+        main_branch, _ = Branch.objects.get_or_create(
+            code="MAIN",
+            defaults={
+                "name": "Main Branch",
+                "is_head_office": True,
+                "active": True,
+                "is_system_generated": True,
+            },
+        )
 
-        if not ApplicationSettings.objects.exists():
-            ApplicationSettings.objects.create()
+        if not main_branch.is_head_office:
+            main_branch.is_head_office = True
+            main_branch.save(update_fields=["is_head_office"])
+
+        User = get_user_model()
+        User.objects.filter(is_superuser=True, branch__isnull=True).update(branch=main_branch)
 
         # ---- Currency defaults ----
         default_currencies = [
-            {"name": "US Dollar", "symbol": "$"},
-            {"name": "UAE Dirham", "symbol": "AED"},
-            {"name": "Nepalese Rupee", "symbol": "NPR"},
-            {"name": "Euro", "symbol": "€"},
-            {"name": "British Pound", "symbol": "£"},
-            {"name": "Indian Rupee", "symbol": "₹"},
+            {"code": "USD", "name": "US Dollar", "symbol": "$", "is_base": True},
+            {"code": "AED", "name": "UAE Dirham", "symbol": "AED"},
+            {"code": "NPR", "name": "Nepalese Rupee", "symbol": "NPR"},
+            {"code": "EUR", "name": "Euro", "symbol": "€"},
+            {"code": "GBP", "name": "British Pound", "symbol": "£"},
+            {"code": "INR", "name": "Indian Rupee", "symbol": "₹"},
         ]
+        has_base = Currency.objects.filter(is_base=True).exists()
         for row in default_currencies:
-            Currency.objects.get_or_create(name=row["name"], defaults={"symbol": row["symbol"]})
+            defaults = {
+                "name": row["name"],
+                "symbol": row["symbol"],
+                "is_system_generated": True,
+                "is_base": row.get("is_base", False) and not has_base,
+            }
+            Currency.objects.get_or_create(code=row["code"], defaults=defaults)
 
-        # ---- Payment methods (optional) ----
-        try:
-            default_payment_methods = [
-                {"name": "Cash"},
-                {"name": "Bank Transfer"},
-                {"name": "Cheque"},
-                {"name": "Card"},
-            ]
-            for row in default_payment_methods:
-                PaymentMethod.objects.get_or_create(name=row["name"])
-        except Exception:
-            pass
+        # ---- Tax defaults ----
+        tax_classes = [
+            {"name": "No Tax", "code": "NONE"},
+            {"name": "VAT", "code": "VAT"},
+            {"name": "GST", "code": "GST"},
+        ]
+        tax_class_map = {}
+        for row in tax_classes:
+            tax_class, _ = TaxClass.objects.get_or_create(
+                code=row["code"],
+                defaults={
+                    "name": row["name"],
+                    "description": f"{row['name']} class",
+                    "is_system_generated": True,
+                },
+            )
+            tax_class_map[row["code"]] = tax_class
+
+        tax_rates = [
+            {"tax_class": "NONE", "name": "No Tax (0%)", "rate_percent": 0},
+            {"tax_class": "VAT", "name": "VAT Standard (5%)", "rate_percent": 5},
+            {"tax_class": "VAT", "name": "VAT Zero (0%)", "rate_percent": 0},
+            {"tax_class": "GST", "name": "GST Standard (18%)", "rate_percent": 18},
+        ]
+        for row in tax_rates:
+            TaxRate.objects.get_or_create(
+                tax_class=tax_class_map[row["tax_class"]],
+                name=row["name"],
+                defaults={
+                    "rate_percent": row["rate_percent"],
+                    "inclusive": False,
+                    "is_system_generated": True,
+                },
+            )
 
         # ---- MasterData defaults ----
         master_defaults = {
-            "INCO": ["EXW", "FOB", "CIF", "CFR", "DAP", "DDP"],
-            "STATUS": ["Draft", "Pending", "Approved", "Void", "Cancelled"],
-            "CONTAINER_TYPE": ["20GP", "40GP", "40HC", "45HC"],
-            "CARGO_TYPE": ["General", "Perishable", "Fragile", "Dangerous Goods"],
-            "TRAILER_TYPE": ["Flatbed", "Reefer", "Dry Van", "Lowbed"],
-            "DELIVERY_TYPE": ["Door to Door", "Port to Door", "Door to Port", "Port to Port"],
-            "ShipmenSubType": ["FCL", "LCL", "Breakbulk", "RORO"],  # your model has this typo, matching it
+            "lead-source": [
+                "Facebook",
+                "Instagram",
+                "LinkedIn",
+                "X (Twitter)",
+                "YouTube",
+                "TikTok",
+                "WhatsApp",
+                "Snapchat",
+                "Pinterest",
+            ],
+            "deal-stage": ["Lead", "Qualified", "Proposal", "Won", "Lost"],
+            "tds-type": [
+                "Contractor",
+                "Professional Fees",
+                "Rent",
+                "Commission",
+                "Interest",
+                "Salary",
+                "Purchase of Goods",
+                "Technical Services",
+                "Dividend",
+            ],
+            "custom-fields": ["Custom Fields"],
+            "suggest-selling-price": ["Recent Selling Price", "Fixed Selling Price"],
+            "product-price-basis": ["Inclusive of VAT", "Exclusive of VAT"],
+            "negative-cash-balance": ["Reject", "Warn", "Do Nothing"],
+            "negative-item-balance": ["Reject", "Warn", "Do Nothing"],
+            "credit-limit-exceeds": ["Reject", "Warn", "Do Nothing"],
         }
 
-        for type_master, names in master_defaults.items():
+        for key, names in master_defaults.items():
             for name in names:
-                MasterData.objects.get_or_create(type_master=type_master, name=name, defaults={"active": True})
+                MasterData.objects.get_or_create(
+                    key=key,
+                    name=name,
+                    defaults={"active": True, "is_system_generated": True},
+                )
 
         # ---- Chart of Accounts defaults (per branch) ----
+        account_types = {
+            "asset": ("Asset", AccountType.Category.ASSET, AccountType.NormalBalance.DR),
+            "liability": ("Liability", AccountType.Category.LIABILITY, AccountType.NormalBalance.CR),
+            "equity": ("Equity", AccountType.Category.EQUITY, AccountType.NormalBalance.CR),
+            "income": ("Income", AccountType.Category.INCOME, AccountType.NormalBalance.CR),
+            "expense": ("Expense", AccountType.Category.EXPENSE, AccountType.NormalBalance.DR),
+        }
+        account_type_map = {}
+        for key, (name, category, balance) in account_types.items():
+            account_type, _ = AccountType.objects.get_or_create(
+                name=name,
+                defaults={
+                    "category": category,
+                    "normal_balance": balance,
+                    "is_system_generated": True,
+                },
+            )
+            account_type_map[key] = account_type
+
         coa_template = [
-            {"code": "1000", "name": "Assets", "type": "asset", "parent": None},
-            {"code": "1100", "name": "Current Assets", "type": "asset", "parent": "1000"},
+            {"code": "1000", "name": "Assets", "type": "asset", "parent": None, "is_group": True},
+            {"code": "1100", "name": "Current Assets", "type": "asset", "parent": "1000", "is_group": True},
             {"code": "1110", "name": "Cash", "type": "asset", "parent": "1100"},
             {"code": "1120", "name": "Bank", "type": "asset", "parent": "1100"},
             {"code": "1200", "name": "Accounts Receivable", "type": "asset", "parent": "1000"},
-
-            {"code": "2000", "name": "Liabilities", "type": "liability", "parent": None},
-            {"code": "2100", "name": "Current Liabilities", "type": "liability", "parent": "2000"},
+            {"code": "2000", "name": "Liabilities", "type": "liability", "parent": None, "is_group": True},
+            {"code": "2100", "name": "Current Liabilities", "type": "liability", "parent": "2000", "is_group": True},
             {"code": "2200", "name": "Accounts Payable", "type": "liability", "parent": "2000"},
-
-            {"code": "3000", "name": "Equity", "type": "equity", "parent": None},
-
-            {"code": "4000", "name": "Income", "type": "income", "parent": None},
+            {"code": "3000", "name": "Equity", "type": "equity", "parent": None, "is_group": True},
+            {"code": "4000", "name": "Income", "type": "income", "parent": None, "is_group": True},
             {"code": "4100", "name": "Freight Income", "type": "income", "parent": "4000"},
             {"code": "4200", "name": "Service Income", "type": "income", "parent": "4000"},
-
-            {"code": "5000", "name": "Expenses", "type": "expense", "parent": None},
-            {"code": "5100", "name": "Operating Expenses", "type": "expense", "parent": "5000"},
+            {"code": "5000", "name": "Expenses", "type": "expense", "parent": None, "is_group": True},
+            {"code": "5100", "name": "Operating Expenses", "type": "expense", "parent": "5000", "is_group": True},
             {"code": "5110", "name": "Salaries", "type": "expense", "parent": "5100"},
             {"code": "5120", "name": "Rent", "type": "expense", "parent": "5100"},
             {"code": "5130", "name": "Utilities", "type": "expense", "parent": "5100"},
         ]
 
         for branch in Branch.objects.all():
-            base_filter = {}
-            if _model_has_field(ChartofAccounts, "branch"):
-                base_filter["branch"] = branch
-
-            # if branch already has COA, don't spam duplicates
-            if base_filter and ChartofAccounts.objects.filter(**base_filter).exists():
-                continue
-            if not base_filter and ChartofAccounts.objects.exists():
+            if COA.objects.filter(branch=branch).exists():
                 continue
 
             by_code = {}
 
-            # create parents first
             for row in [r for r in coa_template if r["parent"] is None]:
-                defaults = {"name": row["name"], "type": row["type"]}
-                if _model_has_field(ChartofAccounts, "description"):
-                    defaults["description"] = ""
-
-                obj, _ = ChartofAccounts.objects.get_or_create(
+                obj, _ = COA.objects.get_or_create(
+                    branch=branch,
                     code=row["code"],
-                    defaults=defaults,
-                    **base_filter,
+                    defaults={
+                        "name": row["name"],
+                        "description": "",
+                        "account_type": account_type_map[row["type"]],
+                        "is_group": row.get("is_group", False),
+                        "is_system": True,
+                        "is_system_generated": True,
+                    },
                 )
                 by_code[row["code"]] = obj
 
-            # create children
             for row in [r for r in coa_template if r["parent"] is not None]:
                 parent_obj = by_code.get(row["parent"])
-                defaults = {"name": row["name"], "type": row["type"]}
-                if _model_has_field(ChartofAccounts, "parent_account"):
-                    defaults["parent_account"] = parent_obj
-                if _model_has_field(ChartofAccounts, "description"):
-                    defaults["description"] = ""
-
-                obj, _ = ChartofAccounts.objects.get_or_create(
+                obj, _ = COA.objects.get_or_create(
+                    branch=branch,
                     code=row["code"],
-                    defaults=defaults,
-                    **base_filter,
+                    defaults={
+                        "name": row["name"],
+                        "description": "",
+                        "parent": parent_obj,
+                        "account_type": account_type_map[row["type"]],
+                        "is_group": row.get("is_group", False),
+                        "is_system": True,
+                        "is_system_generated": True,
+                    },
                 )
                 by_code[row["code"]] = obj

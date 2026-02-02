@@ -8,6 +8,8 @@ AUTH_USER_MODEL = "core.CustomUser"
 INSTALLED_APPS = [
     'core',
     'master',
+    'inventory',
+    'django_filters',
 
     "rest_framework",
     "corsheaders",
@@ -109,4 +111,3 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://localhost:3000",
 ]
-

@@ -64,15 +64,24 @@ class BaseModelViewSet(BranchScopedMixin, BulkModelViewSet):
 
     def perform_create(self, serializer):
         branch = self.request.user.branch
-        extra = {"branch": branch}
-        serializer.save(**extra)
+        extra = {}
+        model_cls = serializer.Meta.model
+        if branch is not None and any(f.name == "branch" for f in model_cls._meta.get_fields()):
+            extra["branch"] = branch
+        if extra:
+            serializer.save(**extra)
+        else:
+            serializer.save()
 
     def perform_update(self, serializer):
         extra = {}
         branch = self.request.user.branch
-        if branch is not None:
+        model_cls = serializer.Meta.model
+        if branch is not None and any(f.name == "branch" for f in model_cls._meta.get_fields()):
             extra["branch"] = branch
-        serializer.save(**extra)
-
+        if extra:
+            serializer.save(**extra)
+        else:
+            serializer.save()
 
 

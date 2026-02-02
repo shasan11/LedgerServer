@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from core.utils.coreModels import BranchScopedStampedOwnedActive
 
@@ -94,7 +95,7 @@ class Deal(BranchScopedStampedOwnedActive):
     source = models.CharField(max_length=80, null=True, blank=True)
 
     owner = models.ForeignKey(
-        "auth.User",
+        settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         null=True,
         blank=True,
@@ -174,7 +175,7 @@ class Activity(BranchScopedStampedOwnedActive):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
 
     assigned_to = models.ForeignKey(
-        "auth.User",
+        settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         null=True,
         blank=True,

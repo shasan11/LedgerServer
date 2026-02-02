@@ -1,5 +1,10 @@
+# pos/serializers.py
+
 import uuid
+from django.apps import apps
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
+
 from core.utils.AdaptedBulkListSerializer import BulkModelSerializer
 from .models import (
     POSRegister,
@@ -16,26 +21,40 @@ from .models import (
     POSDiscountProfile,
     POSTaxProfile,
 )
+from inventory.models import Warehouse
+
+
+# -----------------------------
+# Safe model lookups (no direct imports -> fewer circular import issues)
+# -----------------------------
+User = get_user_model()
+BankAccount = apps.get_model("accounting", "BankAccount")
+Contact = apps.get_model("crm", "Contact")
+ProductVariant = apps.get_model("inventory", "ProductVariant")
+TaxRate = apps.get_model("master", "TaxRate")
 
 
 class ReadablePKField(serializers.PrimaryKeyRelatedField):
-    """Shows readable string in response while still being PK-based."""
-
+    """
+    PK-based field that returns a readable {id,label} in responses.
+    """
     def to_representation(self, value):
+        if value is None:
+            return None
         return {"id": str(value.pk), "label": str(value)}
 
 
+# =========================================================
+# REGISTER
+# =========================================================
 class POSRegisterSerializer(BulkModelSerializer):
-    warehouse = ReadablePKField(queryset=None, required=False, allow_null=True)
-    cash_account = ReadablePKField(queryset=None, required=False, allow_null=True)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        from inventory.models import Warehouse
-        from accounting.models import BankAccount
-
-        self.fields["warehouse"].queryset = Warehouse.objects.all()
-        self.fields["cash_account"].queryset = BankAccount.objects.all()
+    # ✅ NEVER queryset=None on relational fields (this was your crash)
+    warehouse = ReadablePKField(
+        queryset=Warehouse.objects.all(), required=False, allow_null=True
+    )
+    cash_account = ReadablePKField(
+        queryset=BankAccount.objects.all(), required=False, allow_null=True
+    )
 
     class Meta:
         model = POSRegister
@@ -43,17 +62,13 @@ class POSRegisterSerializer(BulkModelSerializer):
         read_only_fields = ("id", "created", "updated", "user_add", "history", "is_system_generated")
 
 
+# =========================================================
+# SHIFT
+# =========================================================
 class POSShiftSerializer(BulkModelSerializer):
     register = ReadablePKField(queryset=POSRegister.objects.all())
-    opened_by = ReadablePKField(queryset=None)
-    closed_by = ReadablePKField(queryset=None, required=False, allow_null=True)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        from django.contrib.auth import get_user_model
-
-        self.fields["opened_by"].queryset = get_user_model().objects.all()
-        self.fields["closed_by"].queryset = get_user_model().objects.all()
+    opened_by = ReadablePKField(queryset=User.objects.all())
+    closed_by = ReadablePKField(queryset=User.objects.all(), required=False, allow_null=True)
 
     class Meta:
         model = POSShift
@@ -61,6 +76,9 @@ class POSShiftSerializer(BulkModelSerializer):
         read_only_fields = ("id", "created", "updated", "user_add", "history", "is_system_generated")
 
 
+# =========================================================
+# SESSION
+# =========================================================
 class POSSessionSerializer(BulkModelSerializer):
     shift = ReadablePKField(queryset=POSShift.objects.all())
 
@@ -70,6 +88,9 @@ class POSSessionSerializer(BulkModelSerializer):
         read_only_fields = ("id", "created", "updated", "user_add", "history", "is_system_generated")
 
 
+# =========================================================
+# CASH MOVEMENT
+# =========================================================
 class POSCashMovementSerializer(BulkModelSerializer):
     shift = ReadablePKField(queryset=POSShift.objects.all())
 
@@ -79,6 +100,9 @@ class POSCashMovementSerializer(BulkModelSerializer):
         read_only_fields = ("id", "created", "updated", "user_add", "history", "is_system_generated")
 
 
+# =========================================================
+# PAYMENT METHOD
+# =========================================================
 class POSPaymentMethodSerializer(BulkModelSerializer):
     class Meta:
         model = POSPaymentMethod
@@ -86,18 +110,14 @@ class POSPaymentMethodSerializer(BulkModelSerializer):
         read_only_fields = ("id", "created", "updated", "user_add", "history", "is_system_generated")
 
 
+# =========================================================
+# ORDER ITEM
+# =========================================================
 class POSOrderItemSerializer(BulkModelSerializer):
     id = serializers.UUIDField(required=False)
-    product_variant = ReadablePKField(queryset=None)
-    tax_rate = ReadablePKField(queryset=None, required=False, allow_null=True)
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        from inventory.models import ProductVariant
-        from master.models import TaxRate
-
-        self.fields["product_variant"].queryset = ProductVariant.objects.all()
-        self.fields["tax_rate"].queryset = TaxRate.objects.all()
+    product_variant = ReadablePKField(queryset=ProductVariant.objects.all())
+    tax_rate = ReadablePKField(queryset=TaxRate.objects.all(), required=False, allow_null=True)
 
     class Meta:
         model = POSOrderItem
@@ -117,24 +137,22 @@ class POSOrderItemSerializer(BulkModelSerializer):
         read_only_fields = ("pos_order", "created", "updated")
 
 
+# =========================================================
+# ORDER
+# =========================================================
 class POSOrderSerializer(BulkModelSerializer):
     register = ReadablePKField(queryset=POSRegister.objects.all())
     shift = ReadablePKField(queryset=POSShift.objects.all())
-    customer = ReadablePKField(queryset=None, required=False, allow_null=True)
+    customer = ReadablePKField(queryset=Contact.objects.all(), required=False, allow_null=True)
+
     items = POSOrderItemSerializer(many=True, required=False)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        from crm.models import Contact
-
-        self.fields["customer"].queryset = Contact.objects.all()
 
     class Meta:
         model = POSOrder
         fields = "__all__"
         read_only_fields = ("id", "created", "updated", "user_add", "history", "is_system_generated")
 
-    def _ensure_item_uuid(self, item):
+    def _ensure_item_uuid(self, item: dict) -> dict:
         if not item.get("id"):
             item["id"] = uuid.uuid4()
         return item
@@ -165,6 +183,9 @@ class POSOrderSerializer(BulkModelSerializer):
         return instance
 
 
+# =========================================================
+# PAYMENT
+# =========================================================
 class POSPaymentSerializer(BulkModelSerializer):
     pos_order = ReadablePKField(queryset=POSOrder.objects.all())
     method = ReadablePKField(queryset=POSPaymentMethod.objects.all())
@@ -175,6 +196,9 @@ class POSPaymentSerializer(BulkModelSerializer):
         read_only_fields = ("id", "created", "updated", "user_add", "history", "is_system_generated")
 
 
+# =========================================================
+# RECEIPT
+# =========================================================
 class POSReceiptSerializer(BulkModelSerializer):
     pos_order = ReadablePKField(queryset=POSOrder.objects.all())
 
@@ -184,19 +208,17 @@ class POSReceiptSerializer(BulkModelSerializer):
         read_only_fields = ("id", "created", "updated", "user_add", "history", "is_system_generated")
 
 
+# =========================================================
+# RETURN ITEM
+# =========================================================
 class POSReturnItemSerializer(BulkModelSerializer):
     id = serializers.UUIDField(required=False)
-    pos_order_item = ReadablePKField(queryset=POSOrderItem.objects.all(), required=False, allow_null=True)
-    product_variant = ReadablePKField(queryset=None)
-    tax_rate = ReadablePKField(queryset=None, required=False, allow_null=True)
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        from inventory.models import ProductVariant
-        from master.models import TaxRate
-
-        self.fields["product_variant"].queryset = ProductVariant.objects.all()
-        self.fields["tax_rate"].queryset = TaxRate.objects.all()
+    pos_order_item = ReadablePKField(
+        queryset=POSOrderItem.objects.all(), required=False, allow_null=True
+    )
+    product_variant = ReadablePKField(queryset=ProductVariant.objects.all())
+    tax_rate = ReadablePKField(queryset=TaxRate.objects.all(), required=False, allow_null=True)
 
     class Meta:
         model = POSReturnItem
@@ -215,23 +237,21 @@ class POSReturnItemSerializer(BulkModelSerializer):
         read_only_fields = ("pos_return", "created", "updated")
 
 
+# =========================================================
+# RETURN
+# =========================================================
 class POSReturnSerializer(BulkModelSerializer):
     pos_order = ReadablePKField(queryset=POSOrder.objects.all(), required=False, allow_null=True)
-    customer = ReadablePKField(queryset=None, required=False, allow_null=True)
+    customer = ReadablePKField(queryset=Contact.objects.all(), required=False, allow_null=True)
+
     items = POSReturnItemSerializer(many=True, required=False)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        from crm.models import Contact
-
-        self.fields["customer"].queryset = Contact.objects.all()
 
     class Meta:
         model = POSReturn
         fields = "__all__"
         read_only_fields = ("id", "created", "updated", "user_add", "history", "is_system_generated")
 
-    def _ensure_item_uuid(self, item):
+    def _ensure_item_uuid(self, item: dict) -> dict:
         if not item.get("id"):
             item["id"] = uuid.uuid4()
         return item
@@ -262,6 +282,9 @@ class POSReturnSerializer(BulkModelSerializer):
         return instance
 
 
+# =========================================================
+# DISCOUNT PROFILE
+# =========================================================
 class POSDiscountProfileSerializer(BulkModelSerializer):
     class Meta:
         model = POSDiscountProfile
@@ -269,14 +292,11 @@ class POSDiscountProfileSerializer(BulkModelSerializer):
         read_only_fields = ("id", "created", "updated", "user_add", "history", "is_system_generated")
 
 
+# =========================================================
+# TAX PROFILE
+# =========================================================
 class POSTaxProfileSerializer(BulkModelSerializer):
-    tax_rate = ReadablePKField(queryset=None)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        from master.models import TaxRate
-
-        self.fields["tax_rate"].queryset = TaxRate.objects.all()
+    tax_rate = ReadablePKField(queryset=TaxRate.objects.all())
 
     class Meta:
         model = POSTaxProfile

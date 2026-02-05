@@ -11,6 +11,7 @@ INSTALLED_APPS = [
     'inventory',
     'accounting',
     'crm',
+    'hrm',
     'pos',
     'purchase',
     'sales',

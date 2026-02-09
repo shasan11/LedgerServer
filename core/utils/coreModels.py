@@ -31,7 +31,7 @@ class StampedOwnedActive(UUIDPk):
 
 class BranchScoped(models.Model):
     branch = models.ForeignKey(
-        "master.Branch",   # ✅ string reference avoids circular import
+        "master.Branch",   
         on_delete=models.PROTECT,
         related_name="%(app_label)s_%(class)s_branch",
         blank=True,

@@ -57,3 +57,4 @@ class BulkModelSerializer(BulkSerializerMixin, serializers.ModelSerializer):
     class Meta:
         list_serializer_class = AdaptedBulkListSerializer
         depth=2
+        readonly_feilds=['created','updated','user_add','is_system_generated','id','uuid']
